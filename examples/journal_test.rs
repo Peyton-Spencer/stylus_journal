@@ -9,7 +9,7 @@ use ethers::{
     prelude::abigen,
     providers::{Http, Middleware, Provider},
     signers::{LocalWallet, Signer},
-    types::Address,
+    types::{Address, U256},
 };
 use eyre::eyre;
 use std::io::{BufRead, BufReader};
@@ -33,11 +33,10 @@ async fn main() -> eyre::Result<()> {
     let program_address = std::env::var(STYLUS_PROGRAM_ADDRESS)
         .map_err(|_| eyre!("No {} env var set", STYLUS_PROGRAM_ADDRESS))?;
     abigen!(
-        Counter,
+        Journal,
         r#"[
-            function number() external view returns (uint256)
-            function setNumber(uint256 number) external
-            function increment() external
+            function newEntry(string calldata title, string calldata body) external
+            function getEntry(address _address, uint256 idx) external view returns (uint8[] memory)
         ]"#
     );
 
@@ -46,21 +45,24 @@ async fn main() -> eyre::Result<()> {
 
     let privkey = read_secret_from_file(&priv_key_path)?;
     let wallet = LocalWallet::from_str(&privkey)?;
+    let user_address = wallet.address();
     let chain_id = provider.get_chainid().await?.as_u64();
     let client = Arc::new(SignerMiddleware::new(
         provider,
         wallet.clone().with_chain_id(chain_id),
     ));
 
-    let counter = Counter::new(address, client);
-    let num = counter.number().call().await;
-    println!("Counter number value = {:?}", num);
+    let journal = Journal::new(address, client);
 
-    let _ = counter.increment().send().await?.await?;
-    println!("Successfully incremented counter via a tx");
+    journal
+        .new_entry("test entry".to_string(), "body body body".to_string())
+        .send()
+        .await?
+        .await?;
+    println!("New entry added to the journal");
 
-    let num = counter.number().call().await;
-    println!("New counter number value = {:?}", num);
+    let entry = journal.get_entry(user_address, U256::from(1)).await?;
+    println!("Journal Body = {:?}", entry);
     Ok(())
 }
 
